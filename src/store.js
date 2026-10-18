@@ -89,6 +89,7 @@
         space: byId.get(p.folderId).space,
         known: Array.isArray(p.known) ? p.known.filter((x) => typeof x === 'string') : [],
         at: typeof p.at === 'number' ? p.at : Date.now(),
+        oneShot: !!p.oneShot, // filing a dragged row that had no readable link
       };
     }
     return s;
@@ -140,7 +141,10 @@
     if (url.hostname !== 'claude.ai') return null;
     const seg = url.pathname.split('/').filter(Boolean);
     if (seg.length !== 2) return null;
-    if (seg[0] === 'chat' || seg[0] === 'code') return '/' + seg.join('/');
+    // Only real chats: /code/session_<id> and /chat/<uuid>, not nav pages
+    // such as /code/projects or /code/artifacts.
+    if (seg[0] === 'code' && /^session_[\w-]+$/.test(seg[1])) return '/' + seg.join('/');
+    if (seg[0] === 'chat' && /^[0-9a-f][0-9a-f-]{7,}$/i.test(seg[1])) return '/' + seg.join('/');
     return null;
   }
 
