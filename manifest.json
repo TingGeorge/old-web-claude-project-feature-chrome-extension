@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Claude Folders",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Organize your Claude chats and Claude Code sessions into folders in the sidebar, like the old Projects.",
   "permissions": ["storage", "contextMenus"],
   "background": { "service_worker": "background.js" },

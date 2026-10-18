@@ -9,6 +9,9 @@
 
   const S = window.ClaudeFoldersStore;
   const LABELS = ['Pinned', 'Starred', 'Recents'];
+  // Clickable chat rows in sidebars that do not use plain <a href> links.
+  const ROW_SELECTOR = 'a, [role="link"], [role="button"], [role="menuitem"], [role="option"], button, li, [tabindex]';
+  const ONE_SHOT_TTL = 15 * 1000;
   const SIDEBAR_PAGES = /^\/(code|chat|new|recents)(\/|$)/;
   const PENDING_TTL = 60 * 60 * 1000;
 
@@ -31,7 +34,6 @@
   let menu = null; // { folderId, x, y }
   let searchOpen = false;
   let query = '';
-  let drag = null; // { kind: 'link'|'item'|'folder', path?, title?, id? }
   let floatingOpen = false;
   let lastHref = location.href;
 
@@ -136,9 +138,27 @@
     return item.title || 'Untitled ' + (item.path.startsWith('/code/') ? 'session' : 'chat');
   }
 
-  function navigate(path) {
+  // Sidebars whose chat rows are not <a href> links: the outermost clickable
+  // rows after a heading, matched to filed chats by title instead of URL.
+  function titleRows(c, after) {
+    if (!c || !after || nativeLinks(c.root).length) return [];
+    const out = [];
+    for (const el of c.root.querySelectorAll(ROW_SELECTOR)) {
+      if (isOurs(el) || el.contains(after)) continue;
+      if (!(after.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
+      const outer = el.parentElement && el.parentElement.closest(ROW_SELECTOR);
+      if (outer && c.root.contains(outer) && !outer.contains(after)) continue;
+      const t = textOf(el);
+      if (t && !LABELS.includes(t)) out.push([el, t]);
+    }
+    return out;
+  }
+
+  function navigate(path, title) {
     const a = findNativeLink(path);
-    if (a) a.click();
+    if (a) return a.click();
+    const row = title && titleRows(ctx, ctx && ctx.heading).find(([, t]) => t === title);
+    if (row) row[0].click();
     else location.assign(path);
   }
 
@@ -337,7 +357,9 @@
     if (document.getElementById('claude-folders-page-style')) return;
     const style = document.createElement('style');
     style.id = 'claude-folders-page-style';
-    style.textContent = '[data-cf-hidden]{display:none!important}';
+    style.textContent =
+      '[data-cf-hidden]{display:none!important}' +
+      'html[data-cf-dragging],html[data-cf-dragging] *{cursor:grabbing!important;user-select:none!important}';
     (document.head || document.documentElement).appendChild(style);
   }
 
@@ -365,6 +387,16 @@
           if (!filed.has(p)) continue;
           if (!(c.recents.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
           const w = rowWrapper(a, c);
+          keep.add(w);
+          if (!w.hasAttribute('data-cf-hidden')) w.setAttribute('data-cf-hidden', '');
+        }
+        const titles = new Set();
+        for (const f of state.folders) {
+          if (f.space === space) for (const it of f.items) if (it.title) titles.add(it.title);
+        }
+        for (const [row, t] of titleRows(c, c.recents)) {
+          if (!titles.has(t)) continue;
+          const w = rowWrapper(row, c);
           keep.add(w);
           if (!w.hasAttribute('data-cf-hidden')) w.setAttribute('data-cf-hidden', '');
         }
@@ -415,7 +447,7 @@
   function checkPending() {
     const p = state.pending;
     if (!p || p.space !== S.spaceOf(location.pathname)) return;
-    if (Date.now() - p.at > PENDING_TTL) {
+    if (Date.now() - p.at > (p.oneShot ? ONE_SHOT_TTL : PENDING_TTL)) {
       S.update((st) => {
         st.pending = null;
       });
@@ -633,7 +665,7 @@
     }
 
     const p = state.pending;
-    const pendingFolder = p && p.space === space ? S.findFolder(state, p.folderId) : null;
+    const pendingFolder = p && !p.oneShot && p.space === space ? S.findFolder(state, p.folderId) : null;
     if (pendingFolder) {
       root.append(
         h(
@@ -674,7 +706,7 @@
     const open = vis ? true : !folder.collapsed;
     const isEditing = editing && editing.kind === 'folder' && editing.id === folder.id;
     const pad = 4 + depth * 14;
-    const isPendingTarget = state.pending && state.pending.folderId === folder.id;
+    const isPendingTarget = state.pending && !state.pending.oneShot && state.pending.folderId === folder.id;
     const row = h(
       'div',
       {
@@ -684,7 +716,6 @@
           (isPendingTarget ? ' cf-pending-target' : ''),
         role: 'treeitem',
         'aria-expanded': String(open),
-        draggable: isEditing ? 'false' : 'true',
         'data-drop': 'folder',
         'data-id': folder.id,
         'data-action': 'toggle-folder',
@@ -746,7 +777,7 @@
           {
             class: 'cf-row cf-item' + (it.path === here ? ' cf-active' : ''),
             href: it.path,
-            draggable: itemEditing ? 'false' : 'true',
+            draggable: 'false',
             'data-drop': 'item',
             'data-path': it.path,
             'data-folder': folder.id,
@@ -1027,33 +1058,59 @@
         }
         ev.preventDefault();
         if (mode === 'floating') floatingOpen = false;
-        navigate(el.getAttribute('data-path'));
+        navigate(el.getAttribute('data-path'), el.getAttribute('title'));
         break;
       }
     }
   }
 
   // ---------------------------------------------------------------- dnd
+  //
+  // Dragging uses pointer events instead of native HTML5 drag and drop.
+  // claude.ai's sidebar rows are not reliably draggable, and the page's own
+  // drop zones (file attachments) can swallow native drag events, so we
+  // track the pointer ourselves and hit-test our section on release.
 
-  function dropEffectFor(dt) {
-    const allowed = dt.effectAllowed;
-    if (!allowed || allowed === 'all' || allowed === 'uninitialized' || allowed.toLowerCase().includes('move')) return 'move';
-    if (allowed.toLowerCase().includes('copy')) return 'copy';
-    return 'link';
+  let press = null; // { x, y, source, started, target }
+  let ghost = null;
+
+  // A chat row in Claude's own sidebar under the pointer. Prefer a real link;
+  // otherwise fall back to the clickable row and resolve its URL on drop.
+  function nativeRowAt(target) {
+    if (!ctx || !ctx.root || !ctx.root.contains(target) || isOurs(target)) return null;
+    const a = target.closest('a[href]');
+    const path = a && S.toPath(a.href);
+    if (path) return { kind: 'link', path, title: textOf(a), el: a };
+    const row = target.closest(ROW_SELECTOR);
+    if (!row || !ctx.root.contains(row) || row.contains(ctx.heading)) return null;
+    if (!(ctx.heading.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING)) return null;
+    const title = textOf(row);
+    if (!title || LABELS.includes(title)) return null;
+    return { kind: 'link', path: null, title, el: row };
   }
 
-  function currentDrag(ev) {
-    if (drag) return drag;
-    const types = ev.dataTransfer ? [...ev.dataTransfer.types] : [];
-    if (types.includes('text/uri-list')) return { kind: 'link', path: null, title: '' };
-    return null;
+  function dragSource(ev) {
+    const path = ev.composedPath();
+    const t = path[0];
+    if (!(t instanceof Element)) return null;
+    if (host && path.includes(host)) {
+      if (t.closest('button, input')) return null;
+      const row = t.closest('.cf-row');
+      if (!row) return null;
+      if (row.classList.contains('cf-folder-row')) {
+        const id = row.getAttribute('data-id');
+        if (editing && editing.kind === 'folder' && editing.id === id) return null;
+        const f = S.findFolder(state, id);
+        return f ? { kind: 'folder', id, title: f.name, el: row } : null;
+      }
+      const p = row.getAttribute('data-path');
+      if (editing && editing.kind === 'item' && editing.path === p) return null;
+      return { kind: 'item', path: p, folderId: row.getAttribute('data-folder'), title: row.title, el: row };
+    }
+    return nativeRowAt(t);
   }
 
-  function dropTarget(ev) {
-    const el = ev.composedPath().find((n) => n instanceof Element && n.hasAttribute && n.hasAttribute('data-drop'));
-    if (!el || !shadow.contains(el)) return null;
-    const d = currentDrag(ev);
-    if (!d) return null;
+  function dropTargetFor(el, d, y) {
     const kind = el.getAttribute('data-drop');
     const isChat = d.kind === 'link' || d.kind === 'item';
     if (isChat && d.path && S.spaceOf(d.path) !== space) return null;
@@ -1061,18 +1118,14 @@
     if (kind === 'folder') {
       const id = el.getAttribute('data-id');
       if (isChat) return { el, where: 'into', folderId: id };
-      if (d.kind === 'folder') {
-        if (d.id === id || S.descendantIds(state, d.id).has(id)) return null;
-        const r = el.getBoundingClientRect();
-        const where = ev.clientY < r.top + r.height * 0.3 ? 'before' : 'into';
-        return { el, where, folderId: id };
-      }
+      if (d.id === id || S.descendantIds(state, d.id).has(id)) return null;
+      const r = el.getBoundingClientRect();
+      return { el, where: y < r.top + r.height * 0.3 ? 'before' : 'into', folderId: id };
     }
     if (kind === 'item') {
-      const folderId = el.getAttribute('data-folder');
       const path = el.getAttribute('data-path');
-      if (isChat) return d.path === path ? null : { el, where: 'before', folderId, beforePath: path };
-      return null;
+      if (!isChat || (d.path && d.path === path)) return null;
+      return { el, where: 'before', folderId: el.getAttribute('data-folder'), beforePath: path };
     }
     if (kind === 'empty') {
       const folderId = el.getAttribute('data-folder');
@@ -1082,38 +1135,94 @@
     if (kind === 'head' || kind === 'hint') {
       if (d.kind === 'folder') return { el, where: 'root' };
       if (d.kind === 'link') return { el, where: 'new-folder' };
-      return null;
     }
     return null;
   }
 
+  function hitTest(x, y, d) {
+    if (!host || !host.isConnected) return null;
+    if (document.elementFromPoint(x, y) !== host) return null;
+    const inner = shadow.elementFromPoint(x, y);
+    const el = inner && inner.closest('[data-drop]');
+    return el ? dropTargetFor(el, d, y) : null;
+  }
+
   let marked = null;
   function markDrop(t) {
-    if (marked && (!t || marked.el !== t.el || marked.cls !== cls(t))) {
+    const cls = t && (t.where === 'before' ? 'cf-drop-before' : 'cf-drop-into');
+    if (marked && (!t || marked.el !== t.el || marked.cls !== cls)) {
       marked.el.classList.remove(marked.cls);
       marked = null;
     }
     if (t && !marked) {
-      marked = { el: t.el, cls: cls(t) };
-      t.el.classList.add(marked.cls);
-    }
-    function cls(x) {
-      return x.where === 'before' ? 'cf-drop-before' : 'cf-drop-into';
+      marked = { el: t.el, cls };
+      t.el.classList.add(cls);
     }
   }
 
-  function performDrop(t, d, ev) {
-    if (d.kind === 'link' && !d.path) {
-      const uri = (ev.dataTransfer.getData('text/uri-list') || ev.dataTransfer.getData('text/plain') || '')
-        .split('\n')
-        .find((l) => l && !l.startsWith('#'));
-      d = { kind: 'link', path: uri ? S.toPath(uri.trim()) : null, title: '' };
-      if (!d.path || S.spaceOf(d.path) !== space) return;
-      d.title = titleFor(d.path);
+  function startDrag() {
+    press.started = true;
+    getSelection()?.removeAllRanges();
+    document.documentElement.setAttribute('data-cf-dragging', '');
+    const needsRender = !!menu || (mode === 'floating' && !floatingOpen);
+    menu = null;
+    if (mode === 'floating') floatingOpen = true;
+    if (needsRender) render();
+    if (isOurs(press.source.el)) {
+      const sel = press.source.kind === 'folder'
+        ? `.cf-folder-row[data-id="${CSS.escape(press.source.id)}"]`
+        : `.cf-item[data-path="${CSS.escape(press.source.path)}"]`;
+      shadow.querySelector(sel)?.classList.add('cf-dragging');
     }
+    ghost = document.createElement('claude-folders-ghost');
+    ghost.textContent = press.source.title || 'Chat';
+    const cs = host ? getComputedStyle(host) : null;
+    ghost.style.cssText =
+      'all:initial;position:fixed;z-index:2147483647;pointer-events:none;max-width:240px;' +
+      'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:6px 10px;border-radius:8px;' +
+      'font:13px system-ui,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.3);opacity:.95;' +
+      `background:${(cs && cs.getPropertyValue('--cf-bg').trim()) || '#2b2a28'};` +
+      `color:${(cs && cs.getPropertyValue('--cf-text').trim()) || '#eee'};` +
+      'border:1px solid rgba(128,128,128,.35)';
+    document.documentElement.appendChild(ghost);
+  }
+
+  function moveDrag(x, y) {
+    ghost.style.left = x + 12 + 'px';
+    ghost.style.top = y + 10 + 'px';
+    press.target = hitTest(x, y, press.source);
+    markDrop(press.target);
+  }
+
+  function endDrag(commit) {
+    const p = press;
+    press = null;
+    if (!p || !p.started) return;
+    ghost?.remove();
+    ghost = null;
+    document.documentElement.removeAttribute('data-cf-dragging');
+    markDrop(null);
+    shadow?.querySelectorAll('.cf-dragging').forEach((el) => el.classList.remove('cf-dragging'));
+    // The release would otherwise "click" the row the drag started on.
+    const swallow = (ev) => {
+      if (!ev.isTrusted) return; // our own programmatic clicks still go through
+      window.removeEventListener('click', swallow, true);
+      ev.preventDefault();
+      ev.stopPropagation();
+    };
+    window.addEventListener('click', swallow, true);
+    setTimeout(() => window.removeEventListener('click', swallow, true), 0);
+    if (commit && p.target) performDrop(p.target, p.source);
+  }
+
+  function performDrop(t, d) {
     if (d.kind === 'folder') {
       if (t.where === 'root') S.update((st) => S.moveFolder(st, d.id, null, 'into'));
       else S.update((st) => S.moveFolder(st, d.id, t.folderId, t.where));
+      return;
+    }
+    if (d.kind === 'link' && !d.path) {
+      fileRowByOpening(d, t);
       return;
     }
     if (t.where === 'new-folder') {
@@ -1121,6 +1230,41 @@
       return;
     }
     S.update((st) => S.fileItem(st, t.folderId, d.path, d.title, t.beforePath));
+  }
+
+  // The dragged row had no link to read its URL from. If it is the chat
+  // that is already open, file that; otherwise open it and file whatever
+  // chat it navigates to (a one-shot "pending" filing).
+  function fileRowByOpening(d, t) {
+    const cur = currentPath();
+    const isCurrent = cur && (d.title === titleFor(cur) || d.title === cleanDocTitle());
+    S.update((st) => {
+      let folderId = t.folderId;
+      if (t.where === 'new-folder') {
+        const f = S.addFolder(st, { name: 'New folder', space, parentId: null });
+        st.collapsed[space] = false;
+        editing = { kind: 'folder', id: f.id };
+        folderId = f.id;
+      }
+      if (isCurrent) {
+        S.fileItem(st, folderId, cur, d.title, t.beforePath);
+      } else {
+        st.pending = { folderId, space, known: cur ? [cur] : [], at: Date.now(), oneShot: true };
+      }
+    }).then((st) => {
+      if (isCurrent) return;
+      const at = st.pending && st.pending.at;
+      d.el.click();
+      setTimeout(() => {
+        // Opening the row did not navigate anywhere; give up quietly rather
+        // than guess which chat it was.
+        if (!state.pending || state.pending.at !== at || currentPath() !== cur) return;
+        S.update((s2) => {
+          if (!s2.pending || s2.pending.at !== at) return false;
+          s2.pending = null;
+        });
+      }, 3000);
+    });
   }
 
   // ---------------------------------------------------------------- events
@@ -1196,69 +1340,49 @@
       // Keep clicks inside the edit field from bubbling into row toggles.
       if (ev.target.classList && ev.target.classList.contains('cf-edit')) ev.stopPropagation();
     });
-
-    shadow.addEventListener('dragstart', (ev) => {
-      const row = ev.composedPath().find((n) => n instanceof Element && n.classList.contains('cf-row'));
-      if (!row) return;
-      if (row.classList.contains('cf-folder-row')) {
-        const id = row.getAttribute('data-id');
-        drag = { kind: 'folder', id };
-        ev.dataTransfer.effectAllowed = 'move';
-        ev.dataTransfer.setData('text/plain', S.findFolder(state, id)?.name || '');
-      } else {
-        const path = row.getAttribute('data-path');
-        drag = { kind: 'item', path, folderId: row.getAttribute('data-folder'), title: '' };
-        ev.dataTransfer.effectAllowed = 'copyMove';
-        ev.dataTransfer.setData('text/uri-list', location.origin + path);
-        ev.dataTransfer.setData('text/plain', location.origin + path);
-      }
-      menu = null;
-      requestAnimationFrame(() => row.classList.add('cf-dragging'));
-    });
-
-    shadow.addEventListener('dragover', (ev) => {
-      const t = dropTarget(ev);
-      markDrop(t);
-      if (!t) return;
-      ev.preventDefault();
-      ev.dataTransfer.dropEffect = dropEffectFor(ev.dataTransfer);
-    });
-
-    shadow.addEventListener('dragleave', (ev) => {
-      if (!ev.relatedTarget || !host.contains(ev.relatedTarget)) markDrop(null);
-    });
-
-    shadow.addEventListener('drop', (ev) => {
-      const t = dropTarget(ev);
-      const d = currentDrag(ev);
-      markDrop(null);
-      if (!t || !d) return;
-      ev.preventDefault();
-      performDrop(t, d, ev);
-      drag = null;
-    });
   }
 
-  // Native sidebar links dragged toward our section.
-  document.addEventListener(
-    'dragstart',
+  window.addEventListener(
+    'pointerdown',
     (ev) => {
-      if (host && ev.composedPath().includes(host)) return;
-      const a = ev.composedPath().find((n) => n instanceof Element && n.tagName === 'A' && n.href);
-      const path = a && S.toPath(a.href);
-      drag = path ? { kind: 'link', path, title: textOf(a) } : null;
+      if (ev.button !== 0 || !ev.isPrimary || ev.pointerType === 'touch') return;
+      const source = dragSource(ev);
+      press = source ? { x: ev.clientX, y: ev.clientY, source, started: false, target: null } : null;
     },
     true
   );
-  document.addEventListener(
-    'dragend',
-    () => {
-      drag = null;
-      markDrop(null);
-      shadow?.querySelectorAll('.cf-dragging').forEach((el) => el.classList.remove('cf-dragging'));
+  window.addEventListener(
+    'pointermove',
+    (ev) => {
+      if (!press) return;
+      if (!(ev.buttons & 1)) return endDrag(false);
+      if (!press.started) {
+        if (Math.hypot(ev.clientX - press.x, ev.clientY - press.y) < 6) return;
+        startDrag();
+      }
+      moveDrag(ev.clientX, ev.clientY);
+      // Keep page-level drag handlers (e.g. sortable lists) out of it.
+      ev.stopPropagation();
     },
     true
   );
+  window.addEventListener('pointerup', () => press && endDrag(true), true);
+  window.addEventListener('pointercancel', () => press && endDrag(false), true);
+  window.addEventListener('blur', () => press && endDrag(false));
+  window.addEventListener(
+    'keydown',
+    (ev) => {
+      if (ev.key === 'Escape' && press && press.started) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        endDrag(false);
+      }
+    },
+    true
+  );
+  // The browser's own link drag would take the pointer away from us.
+  document.addEventListener('dragstart', (ev) => press && ev.preventDefault(), true);
+  document.addEventListener('selectstart', (ev) => press && press.started && ev.preventDefault(), true);
 
   document.addEventListener(
     'mousedown',
