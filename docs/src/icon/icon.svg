@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e58a68"/>
+      <stop offset="1" stop-color="#c96442"/>
+    </linearGradient>
+    <linearGradient id="front" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fffaf5"/>
+      <stop offset="1" stop-color="#f6e9df"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+  <!-- back of the folder with its tab -->
+  <path d="M24 38a8 8 0 0 1 8-8h20.7a8 8 0 0 1 5.66 2.34L64 38h32a8 8 0 0 1 8 8v8H24z" fill="#fbe3d6" opacity=".75"/>
+  <!-- a chat bubble peeking out -->
+  <rect x="38" y="42" width="52" height="22" rx="7" fill="#ffffff" opacity=".9"/>
+  <!-- front of the folder -->
+  <path d="M24 54a8 8 0 0 1 8-8h64a8 8 0 0 1 8 8v36a8 8 0 0 1-8 8H32a8 8 0 0 1-8-8z" fill="url(#front)"/>
+  <rect x="40" y="66" width="48" height="5" rx="2.5" fill="#c96442" opacity=".35"/>
+  <rect x="40" y="77" width="32" height="5" rx="2.5" fill="#c96442" opacity=".22"/>
+</svg>

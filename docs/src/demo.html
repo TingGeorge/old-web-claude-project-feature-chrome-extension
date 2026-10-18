@@ -1,0 +1,31 @@
+<!doctype html>
+<!-- Composes the README demo from screenshots that render.mjs takes of the
+     real extension running on tests/fixtures/sidebar.html. -->
+<html><head><meta charset="utf-8"><style>
+  html, body { margin: 0; }
+  body { width: 1280px; height: 880px; overflow: hidden; position: relative; font-family: Inter, -apple-system, sans-serif;
+    background: linear-gradient(160deg, #f7efe9 0%, #f3e4da 60%, #eed8ca 100%); }
+  .window { position: absolute; left: 60px; top: 70px; width: 900px; height: 760px; border-radius: 14px; overflow: hidden;
+    background: #1f1e1d; box-shadow: 0 30px 80px rgba(80,40,20,.35), 0 0 0 1px rgba(0,0,0,.08); }
+  .bar { height: 40px; background: #2b2a28; display: flex; align-items: center; gap: 8px; padding: 0 14px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .url { margin-left: 18px; flex: 1; height: 24px; border-radius: 7px; background: #1f1e1d; color: #a29f97; font-size: 13px;
+    display: flex; align-items: center; padding: 0 12px; }
+  .shot { display: block; width: 900px; height: 720px; object-fit: cover; object-position: left top; }
+  .menu { position: absolute; right: 52px; top: 170px; width: 300px; border-radius: 14px; overflow: hidden;
+    box-shadow: 0 24px 60px rgba(80,40,20,.35), 0 0 0 1px rgba(0,0,0,.08); }
+  .menu img { display: block; width: 100%; }
+  .callout { position: absolute; display: flex; align-items: center; gap: 10px; padding: 9px 16px 9px 9px; border-radius: 999px;
+    background: #fff; color: #7a3a24; font-size: 18px; font-weight: 600; box-shadow: 0 8px 24px rgba(80,40,20,.18); white-space: nowrap; }
+  .n { width: 28px; height: 28px; border-radius: 50%; background: #d27352; color: #fff; display: grid; place-items: center; font-size: 15px; font-weight: 700; }
+</style></head><body>
+  <div class="window">
+    <div class="bar"><span class="dot" style="background:#ff5f57"></span><span class="dot" style="background:#febc2e"></span><span class="dot" style="background:#28c840"></span>
+      <span class="url">claude.ai/code/session_…</span></div>
+    <img class="shot" src="shots/drag.png" alt="">
+  </div>
+  <div class="menu"><img src="shots/menu.png" alt=""></div>
+  <div class="callout" style="left:380px;top:22px"><span class="n">1</span>Drag chats from Recents into a folder</div>
+  <div class="callout" style="left:870px;top:110px"><span class="n">2</span>Subfolders, colors, rename</div>
+  <div class="callout" style="left:395px;top:446px"><span class="n">3</span>Hover a folder, click ✎: the new chat lands in it</div>
+</body></html>

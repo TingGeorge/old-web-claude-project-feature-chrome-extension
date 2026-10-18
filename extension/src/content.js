@@ -149,7 +149,7 @@
       const outer = el.parentElement && el.parentElement.closest(ROW_SELECTOR);
       if (outer && c.root.contains(outer) && !outer.contains(after)) continue;
       const t = textOf(el);
-      if (t && !LABELS.includes(t)) out.push([el, t]);
+      if (t && /[\p{L}\p{N}]/u.test(t) && !LABELS.includes(t)) out.push([el, t]);
     }
     return out;
   }
@@ -158,8 +158,11 @@
     const a = findNativeLink(path);
     if (a) return a.click();
     const row = title && titleRows(ctx, ctx && ctx.heading).find(([, t]) => t === title);
-    if (row) row[0].click();
-    else location.assign(path);
+    if (!row) return location.assign(path);
+    // Click the innermost clickable element carrying the title: the handler
+    // is usually on that, not on the <li> around it.
+    const inner = [row[0], ...row[0].querySelectorAll(ROW_SELECTOR)].filter((el) => textOf(el) === title);
+    inner[inner.length - 1].click();
   }
 
   function newChatPath() {
@@ -906,10 +909,13 @@
 
   // ---------------------------------------------------------------- actions
 
+  // Only touch the menu layer: re-rendering the section here would swap out
+  // the button under a click that is closing the menu, and swallow it.
   function closeMenu() {
     if (!menu) return;
     menu = null;
-    render();
+    renderOverlay();
+    shadow.querySelectorAll('.cf-menu-open').forEach((el) => el.classList.remove('cf-menu-open'));
   }
 
   function newFolder(parentId, withLink) {
@@ -1188,6 +1194,10 @@
   }
 
   function moveDrag(x, y) {
+    // A selection gesture that began before the drag threshold keeps
+    // extending otherwise.
+    const sel = getSelection();
+    if (sel && !sel.isCollapsed) sel.removeAllRanges();
     ghost.style.left = x + 12 + 'px';
     ghost.style.top = y + 10 + 'px';
     press.target = hitTest(x, y, press.source);
@@ -1395,6 +1405,7 @@
     true
   );
   window.addEventListener('resize', () => menu && closeMenu());
+  document.addEventListener('keydown', (ev) => ev.key === 'Escape' && menu && closeMenu(), true);
   document.addEventListener(
     'scroll',
     (ev) => {

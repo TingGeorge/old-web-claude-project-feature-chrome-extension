@@ -1,0 +1,46 @@
+{
+  "manifest_version": 3,
+  "name": "Claude Folders",
+  "version": "1.1.0",
+  "description": "Organize your Claude chats and Claude Code sessions into folders in the sidebar, like the old Projects.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAr3QRbagVsdrsm1K3/f3CTrsBmk4qFb4luXHpv/BUGX/P65j/Hk/4OtICGGbn8aJg54ecV2qtYyswG5SN/3XA7YXFMUYe40vXJ0B8ApruF8o9AQLhgG8GnoxCtkMkGSVMKTfFyXq5dwg9o+bBw24X/ZGArJ9M4jlppERYAJGak7W/f+Ippk9SCFyUi+qfs8oNyChKwTeEe3akQ9kUtKcOz6bCPXHMHkoHVXo365K8ZB9sfXpJN5z+7CSh7fzA4yVfElDzb1Wpd2Y9wJm+okDHBIFCbN1QGY/+nqC9CuBtWoC20A7Yf/Yp3iWHnMTc1vbUpn88lt4XpI56xRNbR6u6sQIDAQAB",
+  "permissions": [
+    "storage",
+    "contextMenus"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://claude.ai/*"
+      ],
+      "js": [
+        "src/store.js",
+        "src/styles.js",
+        "src/content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "Claude Folders",
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "options_ui": {
+    "page": "popup/popup.html",
+    "open_in_tab": true
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
