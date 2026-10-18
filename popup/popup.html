@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claude Folders</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main>
+    <header>
+      <img src="../icons/icon48.png" width="28" height="28" alt="">
+      <div>
+        <h1>Claude Folders</h1>
+        <p class="muted" id="stats">Loading…</p>
+      </div>
+    </header>
+
+    <section>
+      <label class="row">
+        <span>
+          <strong>Hide filed chats from Recents</strong>
+          <small class="muted">Chats in a folder only show inside that folder.</small>
+        </span>
+        <input type="checkbox" id="hideInRecents">
+      </label>
+    </section>
+
+    <section>
+      <h2>Backup</h2>
+      <div class="buttons">
+        <button id="export">Export folders</button>
+        <button id="import">Import…</button>
+        <input type="file" id="importFile" accept="application/json,.json" hidden>
+      </div>
+      <p class="muted small" id="message" role="status"></p>
+    </section>
+
+    <section class="help">
+      <h2>How to use</h2>
+      <ul>
+        <li>Click the folder&nbsp;+ next to <b>Folders</b> in the claude.ai sidebar to make a folder.</li>
+        <li>Drag chats from Recents onto a folder, or right-click a chat → <b>Add to folder</b>.</li>
+        <li>Hover a folder and click the pencil icon to start a new chat that's filed there automatically.</li>
+        <li>Drag folders onto each other to nest them. Double-click a name to rename it.</li>
+      </ul>
+    </section>
+  </main>
+  <script src="../src/store.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
