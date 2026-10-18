@@ -1,0 +1,72 @@
+name: Release
+
+# Publishes a GitHub Release whenever main has a version (extension/manifest.json)
+# that hasn't been released yet. To ship a new version, bump the version in
+# extension/manifest.json and merge to main.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/build.yml
+
+  release:
+    needs: ci
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(scripts/version.sh)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if gh release view "v$version" >/dev/null 2>&1; then
+            echo "Release v$version already exists; nothing to do."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Publish exactly the bundle CI built and tested.
+      - name: Download tested bundle
+        if: steps.version.outputs.exists == 'false'
+        uses: actions/download-artifact@v4
+        with:
+          name: release-bundle
+          path: dist
+
+      - name: Publish release
+        if: steps.version.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cat > notes.md <<NOTES
+          ## Install
+
+          1. Download **claude-folders-v$VERSION.zip** below and unzip it.
+          2. Open \`chrome://extensions\` and turn on **Developer mode** (top right).
+          3. Click **Load unpacked** and choose the unzipped **\`claude-folders\`** folder.
+          4. Reload claude.ai. A **Folders** section appears in the sidebar.
+
+          **Updating from an earlier version:** first click the extension icon → **Export folders** to save a backup. Then copy the new files over your old \`claude-folders\` folder and click ↻ **Reload** on the extension in \`chrome://extensions\`. Your folders stay. If they ever go missing, use **Import…** with the backup.
+
+          \`claude-folders-webstore-v$VERSION.zip\` contains only the extension, for uploading to the Chrome Web Store.
+          NOTES
+          gh release create "v$VERSION" dist/*.zip \
+            --target "$GITHUB_SHA" \
+            --title "Claude Folders v$VERSION" \
+            --notes-file notes.md \
+            --generate-notes
